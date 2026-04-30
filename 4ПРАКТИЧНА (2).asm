@@ -1,0 +1,72 @@
+; practice3.asm - Вивід числа з AX (0..999999) на консоль
+; Використовує лише int 0x80 (sys_write, sys_exit)
+; Компіляція: nasm -f elf32 practice3.asm -o practice3.o
+; Лінкування: ld -m elf_i386 practice3.o -o practice3
+
+section .data
+    buffer db 10 dup(0)     ; буфер для цифр (максимум 6 + '\n')
+    newline db 10
+
+section .text
+global _start
+
+_start:
+    ; ====================== I/O ======================
+    ; Початок програми
+
+    mov ecx, buffer         ; вказівник на буфер
+    add ecx, 9              ; починаємо з кінця буфера (перед '\n')
+    mov byte [ecx], 10      ; записуємо '\n' в кінець
+    mov edi, ecx            ; зберігаємо позицію для виводу
+
+    ; Якщо число = 0 — спеціальний випадок
+    cmp ax, 0
+    je .print_zero
+
+    ; ====================== math + loops ======================
+    ; Перетворення числа в десяткові цифри (від молодших до старших)
+    mov ebx, 10             ; дільник = 10
+    movzx eax, ax           ; розширюємо AX до EAX (число 0..999999)
+
+.convert_loop:
+    xor edx, edx            ; очищаємо EDX перед діленням
+    div ebx                 ; EAX = EAX / 10, EDX = залишок (цифра)
+
+    add dl, '0'             ; перетворюємо цифру в ASCII
+    dec ecx                 ; рухаємося вліво по буферу
+    mov [ecx], dl           ; зберігаємо цифру
+
+    test eax, eax           ; якщо EAX == 0 — всі цифри готові
+    jnz .convert_loop
+
+    ; ====================== I/O ======================
+    ; Підготовка до sys_write
+    mov edx, edi            ; кінець буфера (після останньої цифри)
+    sub edx, ecx            ; довжина = кінець - початок
+    inc edx                 ; +1 для '\n'
+
+    mov eax, 4              ; sys_write
+    mov ebx, 1              ; stdout
+    ; ecx вже вказує на першу цифру
+    int 0x80
+
+    jmp .exit
+
+.print_zero:
+    ; ====================== I/O ======================
+    ; Спеціальний випадок: число 0
+    mov byte [buffer], '0'
+    mov byte [buffer+1], 10
+
+    mov eax, 4              ; sys_write
+    mov ebx, 1              ; stdout
+    mov ecx, buffer
+    mov edx, 2              ; "0\n"
+    int 0x80
+
+.exit:
+    ; ====================== I/O ======================
+    ; Завершення програми
+    mov eax, 1              ; sys_exit
+    xor ebx, ebx            ; код виходу 0
+    int 0x80
