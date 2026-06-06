@@ -1,0 +1,301 @@
+; practice8.asm - Пошук значення в масиві з статистикою входжень
+; i386, NASM, Debian Linux, тільки int 0x80
+
+section .data
+    ; Повідомлення для помилок (не використовуються, але для чистоти)
+    msg_err db "Error", 10
+    len_err equ $ - msg_err
+
+    ; Буфери для введення/виведення
+    input_buf times 32 db 0
+    num_str   times 16 db 0
+    space     db ' '
+    newline   db 10
+
+section .bss
+    ; Масив для зберігання чисел (максимум 100 елементів)
+    array resd 100          ; 32-бітні цілі числа
+
+    ; Допоміжні змінні
+    n         resd 1        ; кількість елементів
+    target    resd 1        ; шукане значення
+    count     resd 1        ; кількість входжень
+    first_idx resd 1        ; перший індекс (-1 якщо не знайдено)
+
+    ; Буфер для зберігання індексів (для виводу)
+    indices   resd 100      ; максимум 100 індексів
+    idx_count resd 1        ; кількість знайдених індексів
+
+section .text
+global _start
+
+_start:
+    ; ==================== I/O + parse: читання n ====================
+    call read_int
+    mov [n], eax
+
+    ; ==================== I/O + parse: читання n чисел ====================
+    mov ecx, [n]
+    mov ebx, 0              ; індекс у масиві
+read_array_loop:
+    cmp ecx, 0
+    jle read_target
+    call read_int
+    mov [array + ebx*4], eax
+    inc ebx
+    dec ecx
+    jmp read_array_loop
+
+read_target:
+    ; ==================== I/O + parse: читання target ====================
+    call read_int
+    mov [target], eax
+
+    ; ==================== logic + loops: лінійний пошук ====================
+    mov dword [count], 0
+    mov dword [first_idx], -1
+    mov dword [idx_count], 0
+
+    mov ecx, 0              ; поточний індекс
+search_loop:
+    cmp ecx, [n]
+    jge search_done
+
+    mov eax, [array + ecx*4]
+    cmp eax, [target]
+    jne not_match
+
+    ; Знайдено співпадіння
+    inc dword [count]
+
+    ; Запам'ятовуємо перший індекс
+    cmp dword [first_idx], -1
+    jne already_have_first
+    mov [first_idx], ecx
+already_have_first:
+
+    ; Зберігаємо індекс у список
+    mov ebx, [idx_count]
+    mov [indices + ebx*4], ecx
+    inc dword [idx_count]
+
+not_match:
+    inc ecx
+    jmp search_loop
+
+search_done:
+
+    ; ==================== I/O: вивід першого індексу ====================
+    mov eax, [first_idx]
+    call print_int
+    call print_newline
+
+    ; ==================== I/O: вивід кількості входжень ====================
+    mov eax, [count]
+    call print_int
+    call print_newline
+
+    ; ==================== I/O: вивід списку індексів ====================
+    mov ecx, [idx_count]
+    cmp ecx, 0
+    je no_indices
+
+    mov ebx, 0              ; індекс у масиві indices
+print_indices_loop:
+    cmp ebx, ecx
+    jge print_indices_done
+
+    mov eax, [indices + ebx*4]
+    call print_int
+
+    inc ebx
+    cmp ebx, ecx
+    jge print_indices_done
+
+    ; Друкуємо пробіл між індексами
+    push ebx
+    push ecx
+    mov eax, 4              ; sys_write
+    mov ebx, 1              ; stdout
+    mov ecx, space
+    mov edx, 1
+    int 0x80
+    pop ecx
+    pop ebx
+
+    jmp print_indices_loop
+
+print_indices_done:
+    call print_newline
+    jmp exit_program
+
+no_indices:
+    ; Якщо індексів немає — просто новий рядок (порожній рядок + \n)
+    call print_newline
+
+exit_program:
+    ; ==================== I/O: завершення програми ====================
+    mov eax, 1              ; sys_exit
+    mov ebx, 0
+    int 0x80
+
+; ================================================================
+; Процедура: read_int
+; Читає ціле число з stdin (може бути від'ємне)
+; Повертає результат у EAX
+; ================================================================
+read_int:
+    push ebx
+    push ecx
+    push edx
+    push esi
+
+    ; Читання рядка
+    mov eax, 3              ; sys_read
+    mov ebx, 0              ; stdin
+    mov ecx, input_buf
+    mov edx, 31
+    int 0x80
+
+    ; Якщо нічого не прочитано
+    test eax, eax
+    jz read_int_error
+
+    mov esi, input_buf
+    mov edx, eax            ; кількість байтів
+    dec edx                 ; ігноруємо \n
+
+    mov eax, 0              ; результат
+    mov ebx, 0              ; знак (0 = позитивне)
+    mov ecx, 0              ; поточний індекс
+
+    ; Перевірка на мінус
+    cmp byte [esi], '-'
+    jne parse_loop
+    inc ebx                 ; знак = негативне
+    inc ecx
+
+parse_loop:
+    cmp ecx, edx
+    jge parse_done
+
+    movzx edi, byte [esi + ecx]
+    cmp edi, '0'
+    jl parse_done
+    cmp edi, '9'
+    jg parse_done
+
+    imul eax, 10
+    sub edi, '0'
+    add eax, edi
+
+    inc ecx
+    jmp parse_loop
+
+parse_done:
+    test ebx, ebx
+    jz read_int_positive
+    neg eax
+
+read_int_positive:
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+read_int_error:
+    mov eax, 0
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+; ================================================================
+; Процедура: print_int
+; Виводить 32-бітне ціле число (підтримує від'ємні)
+; ================================================================
+print_int:
+    push ebx
+    push ecx
+    push edx
+    push esi
+
+    mov esi, num_str + 15   ; починаємо з кінця буфера
+    mov byte [esi], 0
+    dec esi
+
+    mov ebx, eax            ; зберігаємо число
+    test eax, eax
+    jns print_int_positive
+
+    ; Від'ємне число
+    neg eax
+    push eax
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, num_str        ; тимчасово використовуємо для мінуса
+    mov byte [ecx], '-'
+    mov edx, 1
+    int 0x80
+    pop eax
+
+print_int_positive:
+    test eax, eax
+    jnz print_digits
+
+    ; Особливий випадок: число 0
+    mov byte [esi], '0'
+    dec esi
+    jmp print_int_output
+
+print_digits:
+    mov ecx, 10
+digit_loop:
+    xor edx, edx
+    div ecx                 ; eax = eax / 10, edx = остача
+    add dl, '0'
+    mov [esi], dl
+    dec esi
+    test eax, eax
+    jnz digit_loop
+
+print_int_output:
+    inc esi                 ; вказівник на початок числа
+    ; Підрахунок довжини
+    mov ecx, esi
+    mov edx, num_str + 15
+    sub edx, ecx
+    inc edx                 ; +1 для '\0' → реальна довжина
+
+    mov eax, 4              ; sys_write
+    mov ebx, 1              ; stdout
+    int 0x80
+
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+; ================================================================
+; Процедура: print_newline
+; ================================================================
+print_newline:
+    push eax
+    push ebx
+    push ecx
+    push edx
+
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
