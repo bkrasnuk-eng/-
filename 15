@@ -1,0 +1,162 @@
+; I/O section: messages
+section .data
+    prompt_n db 'Enter n (0-12): ', 0
+    fact_msg db 'fact(n) = ', 0
+    calls_msg db 'calls = ', 0
+    newline db 0xA, 0
+
+section .bss
+    input_buf resb 1024
+    n resd 1
+    calls resd 1          ; global counter of recursive calls
+    temp resd 1
+
+section .text
+global _start
+
+_start:
+    ; I/O: read n
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt_n
+    mov edx, 17
+    int 0x80
+
+    call read_input
+    call parse_int
+    mov [n], eax
+
+    ; logic: validate 0 <= n <= 12
+    cmp dword [n], 0
+    jl exit_err
+    cmp dword [n], 12
+    jg exit_err
+
+    ; memory: reset calls counter
+    mov dword [calls], 0
+
+    ; math: call recursive factorial
+    mov eax, [n]
+    call factorial
+
+    ; I/O: print fact(n)
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, fact_msg
+    mov edx, 10
+    int 0x80
+    call print_int
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+
+    ; I/O: print calls
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, calls_msg
+    mov edx, 8
+    int 0x80
+    mov eax, [calls]
+    call print_int
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+
+exit_ok:
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+exit_err:
+    mov eax, 1
+    mov ebx, 1
+    int 0x80
+
+; math: recursive factorial
+; input: eax = n
+; output: eax = n!
+; uses prolog/epilog, saves registers
+factorial:
+    ; memory: increment global calls counter
+    inc dword [calls]
+
+    ; logic: base case n == 0 or n == 1
+    cmp eax, 1
+    jbe fact_base
+
+    ; math: recursive call
+    push eax               ; save n
+    dec eax                ; n-1
+    call factorial
+    pop ebx                ; restore n
+    imul eax, ebx          ; result *= n
+
+    ret
+
+fact_base:
+    mov eax, 1             ; 0! = 1! = 1
+    ret
+
+; I/O helper: read line into buffer
+read_input:
+    mov eax, 3
+    mov ebx, 0
+    mov ecx, input_buf
+    mov edx, 1024
+    int 0x80
+    ret
+
+; parse: simple atoi from input_buf
+parse_int:
+    push ebx
+    mov esi, input_buf
+    xor eax, eax
+parse_loop:
+    mov bl, [esi]
+    inc esi
+    cmp bl, '0'
+    jl parse_done
+    cmp bl, '9'
+    jg parse_done
+    imul eax, eax, 10
+    sub bl, '0'
+    add eax, ebx
+    jmp parse_loop
+parse_done:
+    pop ebx
+    ret
+
+; math: print integer (positive)
+print_int:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    mov ebx, 10
+    xor ecx, ecx
+div_loop:
+    xor edx, edx
+    div ebx
+    push edx
+    inc ecx
+    test eax, eax
+    jnz div_loop
+print_digits:
+    pop edx
+    add dl, '0'
+    mov [temp], edx
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, temp
+    mov edx, 1
+    int 0x80
+    loop print_digits
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
