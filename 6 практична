@@ -1,0 +1,292 @@
+; practice5.asm
+; Порівняння двох 32-бітних чисел (signed та unsigned)
+; Вхід: два числа a і b (можуть бути від'ємними)
+; Вихід: 4 рядки з результатами порівняння та максимумами
+
+section .data
+    input_buf   db  32 dup(0)
+    msg_signed  db  "SIGNED: ", 0
+    msg_unsigned db "UNSIGNED: ", 0
+    str_lt      db  "a < b", 10, 0
+    str_eq      db  "a = b", 10, 0
+    str_gt      db  "a > b", 10, 0
+    newline     db  10
+
+section .text
+global _start
+
+_start:
+    ; ====================== I/O ======================
+    ; Читання першого числа a
+    call read_number
+    mov ebx, eax                ; EBX = a
+
+    ; Читання другого числа b
+    call read_number
+    mov ecx, eax                ; ECX = b
+
+    ; ====================== logic ======================
+    ; Порівняння SIGNED
+    push ecx
+    push ebx
+    call cmp_signed
+    add esp, 8
+
+    ; Порівняння UNSIGNED
+    push ecx
+    push ebx
+    call cmp_unsigned
+    add esp, 8
+
+    ; ====================== logic ======================
+    ; max_signed
+    push ecx
+    push ebx
+    call max_signed
+    call print_number
+    call print_newline
+
+    ; max_unsigned
+    push ecx
+    push ebx
+    call max_unsigned
+    call print_number
+    call print_newline
+
+    ; Завершення
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+; =============================================================
+; Підпрограма: читання 32-бітного числа (signed) з консолі
+; Результат: EAX
+; =============================================================
+read_number:
+    ; ====================== I/O ======================
+    mov eax, 3                  ; sys_read
+    mov ebx, 0                  ; stdin
+    mov ecx, input_buf
+    mov edx, 31
+    int 0x80
+
+    ; ====================== parse ======================
+    xor eax, eax                ; результат = 0
+    mov esi, input_buf
+    xor edx, edx                ; прапорець знаку (0 = +, 1 = -)
+    mov bl, [esi]
+
+    cmp bl, '-'
+    jne .parse_positive
+    inc edx                     ; знак мінус
+    inc esi
+
+.parse_positive:
+    xor ebx, ebx
+
+.parse_loop:
+    movzx ecx, byte [esi]
+    cmp cl, 10                  ; '\n'
+    je .parse_done
+    cmp cl, 13
+    je .parse_done
+    cmp cl, ' '
+    je .parse_done
+
+    cmp cl, '0'
+    jb .parse_done
+    cmp cl, '9'
+    ja .parse_done
+
+    imul eax, 10                ; EAX = EAX * 10  (signed multiplication)
+    sub cl, '0'
+    add eax, ecx
+
+    inc esi
+    jmp .parse_loop
+
+.parse_done:
+    test edx, edx               ; якщо був мінус
+    jz .finish
+    neg eax                     ; EAX = -EAX
+
+.finish:
+    ret
+
+; =============================================================
+; Підпрограма: signed порівняння a і b
+; Вхід: [esp+4] = a, [esp+8] = b
+; =============================================================
+cmp_signed:
+    ; ====================== logic ======================
+    mov eax, [esp+4]            ; a
+    mov ebx, [esp+8]            ; b
+
+    cmp eax, ebx
+    jl .signed_less
+    je .signed_equal
+    jmp .signed_greater
+
+.signed_less:
+    mov ecx, str_lt
+    jmp .print_signed
+
+.signed_equal:
+    mov ecx, str_eq
+    jmp .print_signed
+
+.signed_greater:
+    mov ecx, str_gt
+
+.print_signed:
+    ; ====================== I/O ======================
+    mov eax, 4
+    mov ebx, 1
+    push ecx
+    mov ecx, msg_signed
+    mov edx, 8                  ; "SIGNED: "
+    int 0x80
+
+    pop ecx
+    mov edx, 7                  ; довжина "a < b\n" тощо
+    mov ebx, 1
+    mov eax, 4
+    int 0x80
+    ret
+
+; =============================================================
+; Підпрограма: unsigned порівняння a і b
+; Вхід: [esp+4] = a, [esp+8] = b
+; =============================================================
+cmp_unsigned:
+    ; ====================== logic ======================
+    mov eax, [esp+4]            ; a
+    mov ebx, [esp+8]            ; b
+
+    cmp eax, ebx
+    jb .unsigned_less           ; below (unsigned)
+    je .unsigned_equal
+    jmp .unsigned_greater       ; above (unsigned)
+
+.unsigned_less:
+    mov ecx, str_lt
+    jmp .print_unsigned
+
+.unsigned_equal:
+    mov ecx, str_eq
+    jmp .print_unsigned
+
+.unsigned_greater:
+    mov ecx, str_gt
+
+.print_unsigned:
+    ; ====================== I/O ======================
+    mov eax, 4
+    mov ebx, 1
+    push ecx
+    mov ecx, msg_unsigned
+    mov edx, 10                 ; "UNSIGNED: "
+    int 0x80
+
+    pop ecx
+    mov edx, 7
+    mov ebx, 1
+    mov eax, 4
+    int 0x80
+    ret
+
+; =============================================================
+; max_signed(a, b)
+; =============================================================
+max_signed:
+    mov eax, [esp+4]            ; a
+    mov ebx, [esp+8]            ; b
+    cmp eax, ebx
+    jg .take_a
+    mov eax, ebx
+.take_a:
+    ret
+
+; =============================================================
+; max_unsigned(a, b)
+; =============================================================
+max_unsigned:
+    mov eax, [esp+4]            ; a
+    mov ebx, [esp+8]            ; b
+    cmp eax, ebx
+    ja .take_a_unsigned         ; above (unsigned)
+    mov eax, ebx
+.take_a_unsigned:
+    ret
+
+; =============================================================
+; Вивід 32-бітного signed числа з EAX
+; =============================================================
+print_number:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+
+    mov esi, input_buf + 30     ; використовуємо input_buf як тимчасовий
+    mov byte [esi], 10          ; '\n'
+
+    mov ebx, 10
+    test eax, eax
+    jns .positive
+
+    ; Від'ємне число
+    neg eax
+    push eax
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, input_buf + 31     ; "-"
+    mov byte [ecx], '-'
+    mov edx, 1
+    int 0x80
+    pop eax
+
+.positive:
+    cmp eax, 0
+    je .print_zero
+
+.print_loop:
+    xor edx, edx
+    div ebx
+    add dl, '0'
+    dec esi
+    mov [esi], dl
+    test eax, eax
+    jnz .print_loop
+    jmp .print_str
+
+.print_zero:
+    dec esi
+    mov byte [esi], '0'
+
+.print_str:
+    ; ====================== I/O ======================
+    lea ecx, [esi]
+    mov edx, input_buf + 31
+    sub edx, esi
+    inc edx                     ; + '\n'
+
+    mov eax, 4
+    mov ebx, 1
+    int 0x80
+
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+print_newline:
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+    ret
