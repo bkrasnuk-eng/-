@@ -1,0 +1,233 @@
+; I/O section: messages for prompts and outputs
+section .data
+    prompt_n db 'Enter n (5-200): ', 0
+    prompt_nums db 'Enter n numbers: ', 0
+    orig_msg db 'Original array: ', 0
+    rev_msg db 'Reversed array: ', 0
+    pal_yes db 'PALINDROME: YES', 0xA, 0
+    pal_no db 'PALINDROME: NO', 0xA, 0
+    space db ' ', 0
+    newline db 0xA, 0
+
+; memory: buffers for input, arrays, n
+section .bss
+    input_buf resb 1024
+    num_buf resd 201     ; array of 32-bit ints
+    rev_buf resd 201
+    n resd 1
+    temp resd 1
+
+section .text
+global _start
+
+_start:
+    ; I/O: read n
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt_n
+    mov edx, 19
+    int 0x80
+
+    call read_input
+    call parse_int
+    mov [n], eax
+
+    ; Validate n 5..200 (logic)
+    cmp dword [n], 5
+    jl exit_err
+    cmp dword [n], 200
+    jg exit_err
+
+    ; I/O: read numbers
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt_nums
+    mov edx, 18
+    int 0x80
+
+    ; loops: read n numbers
+    mov ecx, [n]
+    mov edi, num_buf   ; start from beginning
+    read_loop:
+        call read_input
+        call parse_int
+        mov [edi], eax
+        add edi, 4
+        loop read_loop
+
+    ; memory: copy to rev_buf using rep movsd (bonus)
+    mov ecx, [n]
+    mov esi, num_buf
+    mov edi, rev_buf
+    cld
+    rep movsd
+
+    ; logic + loops: reverse the rev_buf using indices *4 and swaps
+    mov eax, 0          ; left index *4 = 0
+    mov ebx, [n]
+    dec ebx             ; right index
+    shl ebx, 2          ; right *4
+reverse_loop:
+    cmp eax, ebx
+    jge reverse_done
+    ; swap using temp registers
+    mov edx, [rev_buf + eax]
+    mov esi, [rev_buf + ebx]
+    mov [rev_buf + eax], esi
+    mov [rev_buf + ebx], edx
+    add eax, 4
+    sub ebx, 4
+    jmp reverse_loop
+reverse_done:
+
+    ; I/O: print original
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, orig_msg
+    mov edx, 17
+    int 0x80
+    mov ecx, [n]
+    mov esi, num_buf
+print_orig:
+    mov eax, [esi]
+    call print_int
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, space
+    mov edx, 1
+    int 0x80
+    add esi, 4
+    loop print_orig
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+
+    ; I/O: print reversed
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, rev_msg
+    mov edx, 17
+    int 0x80
+    mov ecx, [n]
+    mov esi, rev_buf
+print_rev:
+    mov eax, [esi]
+    call print_int
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, space
+    mov edx, 1
+    int 0x80
+    add esi, 4
+    loop print_rev
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+
+    ; logic: check palindrome by comparing pairs using [base + idx*4]
+    xor eax, eax        ; i = 0
+    mov ebx, [n]
+    dec ebx             ; j = n-1
+pal_check:
+    cmp eax, ebx
+    jge pal_yes_label
+    mov edx, [num_buf + eax*4]
+    cmp edx, [rev_buf + ebx*4]
+    jne pal_no_label
+    inc eax
+    dec ebx
+    jmp pal_check
+
+pal_yes_label:
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, pal_yes
+    mov edx, 17
+    int 0x80
+    jmp exit_ok
+
+pal_no_label:
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, pal_no
+    mov edx, 13
+    int 0x80
+
+exit_ok:
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+exit_err:
+    mov eax, 1
+    mov ebx, 1
+    int 0x80
+
+; I/O helper: read line to input_buf (sys_read)
+read_input:
+    mov eax, 3
+    mov ebx, 0
+    mov ecx, input_buf
+    mov edx, 1024
+    int 0x80
+    ret
+
+; parse: parse int from input_buf, simple atoi (I/O + math)
+parse_int:
+    push ebx
+    push ecx
+    push edx
+    mov esi, input_buf
+    xor eax, eax
+    xor ebx, ebx
+parse_loop:
+    mov bl, [esi]
+    inc esi
+    cmp bl, '0'
+    jl parse_done
+    cmp bl, '9'
+    jg parse_done
+    imul eax, 10
+    sub bl, '0'
+    add eax, ebx
+    jmp parse_loop
+parse_done:
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+; math: print int (division loop + I/O)
+print_int:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    mov ebx, 10
+    xor ecx, ecx
+div_loop:
+    xor edx, edx
+    div ebx
+    push edx
+    inc ecx
+    test eax, eax
+    jnz div_loop
+print_digits:
+    pop edx
+    add dl, '0'
+    mov [temp], edx
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, temp
+    mov edx, 1
+    int 0x80
+    loop print_digits
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
