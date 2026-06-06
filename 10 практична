@@ -1,0 +1,262 @@
+section .data
+    prompt db 'Enter 32-bit number x: ', 0
+    prompt_len equ $ - prompt
+    bin_msg db 'Binary: ', 0
+    bin_msg_len equ $ - bin_msg
+    pop_msg db 'Popcount: ', 0
+    pop_msg_len equ $ - pop_msg
+    mod_msg db 'Modified (set p=0,q=1, clear r=2): ', 0
+    mod_msg_len equ $ - mod_msg
+    nl db 10, 0
+
+section .bss
+    input resb 32
+    number resd 1
+    bin_str resb 44   ; 32 bits + 7 spaces + null-ish
+    popcount resd 1
+    mod_num resd 1
+
+section .text
+global _start
+
+_start:
+    ; I/O
+    ; Print prompt
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt
+    mov edx, prompt_len
+    int 0x80
+
+    ; Read input (decimal string)
+    mov eax, 3
+    mov ebx, 0
+    mov ecx, input
+    mov edx, 31
+    int 0x80
+
+    ; parse
+    ; Convert ASCII decimal to 32-bit integer
+    call str_to_int
+    mov [number], eax
+
+    ; math / logic
+    ; Print binary representation (32 bits, groups of 4)
+    mov eax, [number]
+    call print_binary
+
+    ; loops + math
+    ; Calculate popcount(x) using shifts and AND 1 (or ADC)
+    mov eax, [number]
+    call calculate_popcount
+    mov [popcount], eax
+
+    ; I/O
+    ; Print popcount
+    call print_popcount
+
+    ; logic
+    ; Modify: set bits p=0 and q=1, clear bit r=2 using masks
+    mov eax, [number]
+    call modify_number
+    mov [mod_num], eax
+
+    ; I/O
+    ; Print modified number (decimal)
+    call print_modified
+
+    ; Exit
+    mov eax, 1
+    mov ebx, 0
+    int 0x80
+
+; I/O
+; Helper to print string (ecx=addr, edx=len)
+print_string:
+    mov eax, 4
+    mov ebx, 1
+    int 0x80
+    ret
+
+; loops
+; Print binary: 32 bits, groups of 4 with spaces (MSB first)
+print_binary:
+    push eax
+    push ebx
+    push ecx
+    push edx
+
+    mov ecx, 32
+    mov ebx, bin_str
+
+.loop:
+    shl eax, 1
+    jc .print_one
+    mov byte [ebx], '0'
+    jmp .next
+.print_one:
+    mov byte [ebx], '1'
+.next:
+    inc ebx
+
+    ; Space every 4 bits
+    mov edx, ecx
+    dec edx
+    test edx, 3
+    jnz .no_space
+    mov byte [ebx], ' '
+    inc ebx
+.no_space:
+    loop .loop
+
+    ; I/O - print "Binary: "
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, bin_msg
+    mov edx, bin_msg_len
+    int 0x80
+
+    ; I/O - print binary string
+    mov ecx, bin_str
+    mov edx, 39          ; 32 + 7 spaces
+    call print_string
+
+    ; I/O - newline
+    mov ecx, nl
+    mov edx, 1
+    call print_string
+
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; loops + math + logic
+; Popcount via 32 shifts + test LSB
+calculate_popcount:
+    push ebx
+    push ecx
+    xor ebx, ebx         ; count = 0
+    mov ecx, 32
+.loop_pop:
+    shr eax, 1
+    adc ebx, 0           ; if CF==1 (was LSB=1) increment
+    loop .loop_pop
+    mov eax, ebx
+    pop ecx
+    pop ebx
+    ret
+
+; I/O + math
+; Print unsigned decimal number
+print_decimal:
+    push eax
+    push ebx
+    push ecx
+    push edx
+
+    test eax, eax
+    jnz .not_zero
+    mov byte [input], '0'
+    mov ecx, input
+    mov edx, 1
+    call print_string
+    jmp .done_print
+
+.not_zero:
+    mov ebx, 10
+    mov ecx, 0           ; digit counter on stack
+.push_loop:
+    xor edx, edx
+    div ebx
+    push edx
+    inc ecx
+    test eax, eax
+    jnz .push_loop
+
+.pop_loop:
+    pop edx
+    add dl, '0'
+    mov [input], dl
+    mov ecx, input
+    mov edx, 1
+    call print_string
+    loop .pop_loop
+
+.done_print:
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; I/O
+print_popcount:
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, pop_msg
+    mov edx, pop_msg_len
+    int 0x80
+
+    mov eax, [popcount]
+    call print_decimal
+
+    mov ecx, nl
+    mov edx, 1
+    call print_string
+    ret
+
+; logic + math
+; Modify x: set bits p=0, q=1; clear bit r=2 using masks (1<<pos)
+modify_number:
+    ; set bit 0 (p)
+    or eax, (1 << 0)
+    ; set bit 1 (q)
+    or eax, (1 << 1)
+    ; clear bit 2 (r)
+    and eax, ~(1 << 2)
+    ret
+
+; I/O
+print_modified:
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, mod_msg
+    mov edx, mod_msg_len
+    int 0x80
+
+    mov eax, [mod_num]
+    call print_decimal
+
+    mov ecx, nl
+    mov edx, 1
+    call print_string
+    ret
+
+; parse + loops
+; Simple decimal string -> int (positive only, stops at non-digit)
+str_to_int:
+    push ebx
+    push ecx
+    push edx
+    xor eax, eax
+    mov ecx, input
+.loop:
+    movzx edx, byte [ecx]
+    cmp dl, 10          ; newline
+    je .done
+    cmp dl, '0'
+    jb .done
+    cmp dl, '9'
+    ja .done
+    imul eax, eax, 10
+    sub dl, '0'
+    add eax, edx
+    inc ecx
+    jmp .loop
+.done:
+    pop edx
+    pop ecx
+    pop ebx
+    ret
