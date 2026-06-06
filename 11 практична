@@ -1,0 +1,150 @@
+section .data
+    prompt db "Enter height h (5..25): ", 0
+    prompt_len equ $ - prompt
+    newline db 10
+
+section .bss
+    buffer resb 32     ; для вводу
+    height resd 1      ; висота
+    line_buf resb 128  ; буфер для рядка
+
+section .text
+global _start
+
+_start:
+    ; I/O: вивід запиту
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt
+    mov edx, prompt_len
+    int 0x80
+
+    ; I/O: читання вводу
+    mov eax, 3
+    mov ebx, 0
+    mov ecx, buffer
+    mov edx, 32
+    int 0x80
+
+    ; parse: перетворення рядка в число
+    call parse_number
+    mov [height], eax
+
+    ; loops + math: основний цикл по рядках
+    mov ecx, 0          ; i = 0
+print_loop:
+    cmp ecx, [height]
+    jge end_print
+
+    ; math: пробіли = h - 1 - i
+    mov eax, [height]
+    dec eax
+    sub eax, ecx
+    push eax            ; param: spaces
+
+    ; math: зірочки = 2*i + 1
+    mov eax, ecx
+    shl eax, 1
+    inc eax
+    push eax            ; param: stars
+
+    ; build line у буфері
+    call build_line
+    add esp, 8          ; очистка стеку
+
+    ; I/O: вивід рядка через print_line
+    call print_line
+
+    inc ecx
+    jmp print_loop
+
+end_print:
+    ; I/O: exit
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+; parse: простий atoi
+parse_number:
+    push ebx
+    push ecx
+    xor eax, eax
+    mov ecx, buffer
+parse_loop:
+    mov bl, [ecx]
+    cmp bl, 10
+    je parse_done
+    cmp bl, '0'
+    jl parse_done
+    cmp bl, '9'
+    jg parse_done
+    sub bl, '0'
+    imul eax, 10
+    add eax, ebx
+    inc ecx
+    jmp parse_loop
+parse_done:
+    pop ecx
+    pop ebx
+    ret
+
+; build_line: заповнює line_buf пробілами + зірочками (вкладена логіка циклів)
+build_line:
+    push ebp
+    mov ebp, esp
+    push edi
+    mov edi, line_buf
+
+    ; spaces
+    mov eax, [ebp + 12]
+    mov ecx, eax
+    mov al, ' '
+fill_spaces:
+    test ecx, ecx
+    jz fill_stars
+    stosb
+    dec ecx
+    jmp fill_spaces
+
+fill_stars:
+    ; stars
+    mov eax, [ebp + 8]
+    mov ecx, eax
+    mov al, '*'
+fill_stars_loop:
+    test ecx, ecx
+    jz end_build
+    stosb
+    dec ecx
+    jmp fill_stars_loop
+
+end_build:
+    mov eax, edi
+    sub eax, line_buf   ; len в eax
+    pop edi
+    pop ebp
+    ret
+
+; print_line: один sys_write на рядок + \n
+print_line:
+    ; I/O: вивід рядка (len в eax)
+    push ebx
+    push ecx
+    push edx
+    mov ecx, line_buf
+    mov edx, eax
+    mov eax, 4
+    mov ebx, 1
+    int 0x80
+
+    ; I/O: newline
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+
+    pop edx
+    pop ecx
+    pop ebx
+    ret
