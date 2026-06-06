@@ -1,0 +1,241 @@
+section .data
+    prompt_text   db "Enter text (up to 200 chars): ", 0
+    prompt_text_len equ $ - prompt_text
+    prompt_pat    db "Enter pattern (up to 50 chars): ", 0
+    prompt_pat_len equ $ - prompt_pat
+    msg_first     db "First position: ", 0
+    msg_first_len equ $ - msg_first
+    msg_count     db "Count: ", 0
+    msg_count_len equ $ - msg_count
+    newline       db 10
+    minus_one     db "-1", 10
+
+section .bss
+    text_buf    resb 201
+    text_len    resd 1
+    pat_buf     resb 51
+    pat_len     resd 1
+    out_buf     resb 32     ; для чисел
+
+section .text
+global _start
+
+_start:
+    ; I/O: prompt text
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt_text
+    mov edx, prompt_text_len
+    int 0x80
+
+    ; I/O: read text
+    mov eax, 3
+    mov ebx, 0
+    mov ecx, text_buf
+    mov edx, 200
+    int 0x80
+    call trim_newline
+    mov [text_len], eax
+
+    ; I/O: prompt pattern
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt_pat
+    mov edx, prompt_pat_len
+    int 0x80
+
+    ; I/O: read pattern
+    mov eax, 3
+    mov ebx, 0
+    mov ecx, pat_buf
+    mov edx, 50
+    int 0x80
+    call trim_newline
+    mov [pat_len], eax
+
+    ; logic: special case - empty pattern
+    cmp dword [pat_len], 0
+    je empty_pattern
+
+    ; logic + loops: find first occurrence and count
+    call find_first_and_count
+
+    ; I/O: print first position
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, msg_first
+    mov edx, msg_first_len
+    int 0x80
+
+    mov eax, [first_pos]
+    call print_int
+
+    ; I/O: print count
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, msg_count
+    mov edx, msg_count_len
+    int 0x80
+
+    mov eax, [count]
+    call print_int
+
+    jmp exit_program
+
+empty_pattern:
+    ; I/O: first = 0 (зазвичай), count = 0 або text_len+1 (але за умовою -1 / 0)
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, msg_first
+    mov edx, msg_first_len
+    int 0x80
+    mov ecx, minus_one
+    mov edx, 3
+    int 0x80
+
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, msg_count
+    mov edx, msg_count_len
+    int 0x80
+    mov eax, 0
+    call print_int
+
+exit_program:
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+; memory + loops: власна strlen
+strlen:
+    push ebx
+    push ecx
+    mov ecx, 0
+    mov ebx, eax          ; адреса рядка
+.strlen_loop:
+    cmp byte [ebx + ecx], 0
+    je .strlen_done
+    inc ecx
+    jmp .strlen_loop
+.strlen_done:
+    mov eax, ecx
+    pop ecx
+    pop ebx
+    ret
+
+; I/O + memory: видалення \n
+trim_newline:
+    push ebx
+    mov ebx, eax          ; буфер
+    mov ecx, 0
+.trim_loop:
+    cmp byte [ebx + ecx], 10
+    je .trim_found
+    cmp byte [ebx + ecx], 0
+    je .trim_done
+    inc ecx
+    jmp .trim_loop
+.trim_found:
+    mov byte [ebx + ecx], 0
+.trim_done:
+    mov eax, ecx          ; довжина без \n
+    pop ebx
+    ret
+
+; loops + logic: наївний пошук підрядка (без перекриття)
+find_first_and_count:
+    push ebp
+    mov ebp, esp
+    mov dword [first_pos], -1
+    mov dword [count], 0
+
+    mov esi, 0                ; i - позиція в text
+    mov edx, [text_len]
+    mov ecx, [pat_len]
+
+.search_loop:
+    cmp esi, edx
+    jge .search_end
+    sub edx, ecx
+    cmp esi, edx
+    jg .search_end
+    add edx, ecx
+
+    ; вкладена перевірка символів
+    mov edi, 0                ; j
+.compare_loop:
+    cmp edi, ecx
+    jge .match_found
+
+    mov al, [text_buf + esi + edi]
+    cmp al, [pat_buf + edi]
+    jne .no_match
+
+    inc edi
+    jmp .compare_loop
+
+.match_found:
+    cmp dword [first_pos], -1
+    jne .skip_first
+    mov [first_pos], esi
+.skip_first:
+    inc dword [count]
+    add esi, ecx              ; без перекриття
+    jmp .search_loop
+
+.no_match:
+    inc esi
+    jmp .search_loop
+
+.search_end:
+    pop ebp
+    ret
+
+; math + I/O: вивід цілого числа
+print_int:
+    push ebx
+    push ecx
+    push edx
+    push esi
+
+    mov ebx, out_buf + 31
+    mov byte [ebx], 10
+    mov ecx, 1
+    mov esi, 10
+
+    test eax, eax
+    jns .convert_loop
+    neg eax
+    push eax
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, minus_one - 2   ; "-"
+    mov edx, 1
+    int 0x80
+    pop eax
+
+.convert_loop:
+    xor edx, edx
+    div esi
+    add dl, '0'
+    dec ebx
+    mov [ebx], dl
+    inc ecx
+    test eax, eax
+    jnz .convert_loop
+
+    mov eax, 4
+    mov edx, ecx
+    mov ecx, ebx
+    mov ebx, 1
+    int 0x80
+
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+section .bss
+    first_pos   resd 1
+    count       resd 1
