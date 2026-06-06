@@ -1,0 +1,234 @@
+; I/O section: messages
+section .data
+    prompt_n db 'Enter n (10-100): ', 0
+    prompt_nums db 'Enter n numbers: ', 0
+    orig_msg db 'Original array: ', 0
+    sorted_msg db 'Sorted array: ', 0
+    median_msg db 'Median: ', 0
+    space db ' ', 0
+    newline db 0xA, 0
+
+section .bss
+    input_buf resb 1024
+    arr resd 101         ; array of dwords (max n=100)
+    n resd 1
+    temp resd 1
+
+section .text
+global _start
+
+_start:
+    ; I/O: read n
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt_n
+    mov edx, 20
+    int 0x80
+
+    call read_input
+    call parse_int
+    mov [n], eax
+
+    ; logic: validate n 10..100
+    cmp dword [n], 10
+    jl exit_err
+    cmp dword [n], 100
+    jg exit_err
+
+    ; I/O: read numbers
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, prompt_nums
+    mov edx, 18
+    int 0x80
+
+    ; loops: read n numbers into arr
+    mov ecx, [n]
+    mov edi, arr
+read_loop:
+    call read_input
+    call parse_int
+    mov [edi], eax
+    add edi, 4
+    loop read_loop
+
+    ; I/O: print original array
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, orig_msg
+    mov edx, 16
+    int 0x80
+    call print_array
+
+    ; memory + loops: selection sort
+    mov esi, 0                    ; i = 0
+outer_loop:
+    cmp esi, [n]
+    jge sort_done
+    mov edi, esi                  ; min_idx = i
+    mov ebx, esi
+    inc ebx                       ; j = i + 1
+inner_loop:
+    cmp ebx, [n]
+    jge inner_done
+    ; compare arr[j] < arr[min_idx]
+    mov eax, [arr + ebx*4]
+    cmp eax, [arr + edi*4]
+    jge no_update
+    mov edi, ebx                  ; min_idx = j
+no_update:
+    inc ebx
+    jmp inner_loop
+inner_done:
+    ; swap arr[i] and arr[min_idx] if needed
+    cmp esi, edi
+    je no_swap
+    ; swap two dwords
+    mov eax, [arr + esi*4]
+    mov ebx, [arr + edi*4]
+    mov [arr + esi*4], ebx
+    mov [arr + edi*4], eax
+no_swap:
+    inc esi
+    jmp outer_loop
+sort_done:
+
+    ; I/O: print sorted array
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, sorted_msg
+    mov edx, 14
+    int 0x80
+    call print_array
+
+    ; math + logic: calculate median (lower for even n)
+    mov eax, [n]
+    shr eax, 1                    ; n/2
+    test dword [n], 1
+    jnz odd_median
+    dec eax                       ; for even: n/2 - 1 (lower median)
+odd_median:
+    mov ebx, [arr + eax*4]        ; median value
+
+    ; I/O: print median
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, median_msg
+    mov edx, 8
+    int 0x80
+    mov eax, ebx
+    call print_int
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+
+exit_ok:
+    mov eax, 1
+    xor ebx, ebx
+    int 0x80
+
+exit_err:
+    mov eax, 1
+    mov ebx, 1
+    int 0x80
+
+; I/O helper: read line
+read_input:
+    mov eax, 3
+    mov ebx, 0
+    mov ecx, input_buf
+    mov edx, 1024
+    int 0x80
+    ret
+
+; parse: simple atoi
+parse_int:
+    push ebx
+    push ecx
+    mov esi, input_buf
+    xor eax, eax
+parse_loop:
+    mov bl, [esi]
+    inc esi
+    cmp bl, '0'
+    jl parse_done
+    cmp bl, '9'
+    jg parse_done
+    imul eax, eax, 10
+    sub bl, '0'
+    add eax, ebx
+    jmp parse_loop
+parse_done:
+    pop ecx
+    pop ebx
+    ret
+
+; memory + loops: print array
+print_array:
+    push ecx
+    mov ecx, [n]
+    mov esi, arr
+print_loop:
+    mov eax, [esi]
+    call print_int
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, space
+    mov edx, 1
+    int 0x80
+    add esi, 4
+    loop print_loop
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, newline
+    mov edx, 1
+    int 0x80
+    pop ecx
+    ret
+
+; math: print signed decimal integer
+print_int:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    test eax, eax
+    jns positive
+    neg eax
+    push eax
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, minus_char
+    mov edx, 1
+    int 0x80
+    pop eax
+positive:
+    mov ebx, 10
+    xor ecx, ecx
+div_loop:
+    xor edx, edx
+    div ebx
+    push edx
+    inc ecx
+    test eax, eax
+    jnz div_loop
+print_digits:
+    pop edx
+    add dl, '0'
+    mov [temp], edx
+    mov eax, 4
+    mov ebx, 1
+    mov ecx, temp
+    mov edx, 1
+    int 0x80
+    loop print_digits
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+section .data
+    minus_char db '-', 0
